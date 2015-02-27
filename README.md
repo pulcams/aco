@@ -10,7 +10,9 @@ This Python script (aco.py) will retrieve any missing data and get MARCXML for t
 * `cp aco.cfg.template aco.cfg`
 * fill in aco.cfg
 * make sure the batch picklist is in the network share, in the batches folder
-* `python aco.py -f ` + name of the batch picklist (e.g., `python aco.py -f ACO_princeton_NYU_batch001_20150227.csv`)
+* `python aco.py -f ` + name of the batch picklist.Example:
+
+ `python aco.py -f ACO_princeton_NYU_batch001_20150227.csv`
 * Deliverables will be in ./out
 
 ####Requires
