@@ -2,7 +2,7 @@
 #-*- coding: utf-8 -*-
 
 """
-For Arabic Content Online (ACO)
+For Arabic Collections Online (ACO)
 From csv picklist get MARCXML from Voyager, insert 003, insert CCG_BOOK_ID, format xml
 Set things up aco.cfg. Run like this:
 `python aco.py -f ACO_princeton_NYU_batch001_20150227.csv`
