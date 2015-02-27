@@ -103,10 +103,12 @@ def get_v2m_mrx():
 	timestamp = time.strftime("%Y%m%d")
 	
 	with open(outdir+picklist,'rb') as csvfile:
-		reader = csv.reader(csvfile,delimiter=',', quotechar='|')
+		reader = csv.reader(csvfile,delimiter=',', quotechar='"')
 		firstline = reader.next()
 		for row in reader:
 			bibid = row[1]
+			batchid = row[21]
+			objid = row[22]
 			conn.request("POST", "/tools/v2m/"+bibid+"?format=marc")
 			got = conn.getresponse()
 			data = got.read()
@@ -116,9 +118,12 @@ def get_v2m_mrx():
 						
 			try:
 				f001 = doc.find("marc:record[@type=\'Bibliographic\']/marc:controlfield[@tag=\'001\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'})
+				f008 = doc.find("marc:record[@type=\'Bibliographic\']/marc:controlfield[@tag=\'008\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'})
 				rec = f001.getparent()
-				f001_index = rec.index(f001)
-	
+				#rec2 = f008.getparent()
+				f001_index = rec.index(f001) # get the position of the 001
+				f008_index = rec.index(f008) # and the position of the 008
+				
 				# remove the Holding record(s)
 				for hldg in doc.xpath("//marc:record[@type=\'Holdings\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'}):
 					hldg.getparent().remove(hldg)
@@ -127,13 +132,24 @@ def get_v2m_mrx():
 				for bibrec in doc.xpath("//marc:record[@type=\'Bibliographic\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'}):
 					marc = "http://www.loc.gov/MARC21/slim"
 					ns = {"marc", marc}
+					# 003
 					f003 = etree.Element("{"+marc+"}controlfield",tag="003")
 					f003.text = "NjP"
-					bibrec.insert(f001_index + 1,f003)
-				
-					data = etree.tostring(doc,pretty_print=True,encoding='utf-8')
+					# 024
+					f024 = etree.Element("{"+marc+"}datafield",tag="024")
+					f024.attrib['ind1']='7'
+					f024.attrib['ind2']=' '
+					# 024$a
+					f024a = etree.SubElement(f024,"{"+marc+"}subfield",code="a")
+					f024a.text = 'princeton_aco' + batchid + objid
+					# 024$2
+					f0242 = etree.SubElement(f024, "{"+marc+"}subfield",code="2")
+					f0242.text = "local"
 					
-				# TODO: insert the CCG_BOOK_ID (where?)
+					bibrec.insert(f001_index + 1,f003) # put the 003 immediately following the 001
+					bibrec.insert(f008_index + 2,f024) # put the 024 after the 008
+										
+					data = etree.tostring(doc,pretty_print=True,encoding='utf-8')
 					
 				f = open(outdir+'princeton_aco'+bibid+'_marcxml.xml', 'wb+')
 				f2 = open('log/'+filename + '_out_'+timestamp+'.csv', 'a')
