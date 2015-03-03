@@ -78,11 +78,11 @@ def make_new_csv(picklist):
 	
 	with open(indir+picklist,'rb') as csvfile:
 		reader = csv.reader(csvfile,delimiter=',', quotechar='"')
-		firstline = reader.next() # skip header row
+		#firstline = reader.next() # skip header row
 		for row in reader:
 			bibid = row[1]
 			barcode = row[2]
-			ccgid = row[3]
+			ccgid = row[5]
 			batchid = row[21]
 			objid = row[22]
 			
@@ -193,7 +193,7 @@ def get_missing_data(bc,ccg,bat,obj):
 	db = cx_Oracle.connect(user,pw,dsn_tns)
 	
 	sql = """SELECT 'Princeton' AS LIB, BIB_MFHD.BIB_ID, ITEM_BARCODE.ITEM_BARCODE, MFHD_ITEM.ITEM_ENUM, 
-		MFHD_ITEM.CHRON,'princeton_aco%s' AS CCG_BOOK_ID,'' AS CRATE,BIB_TEXT.BEGIN_PUB_DATE, BIB_TEXT.PLACE_CODE, BIB_TEXT.AUTHOR, 
+		MFHD_ITEM.CHRON,'%s' AS CCG_BOOK_ID,'' AS CRATE,BIB_TEXT.BEGIN_PUB_DATE, BIB_TEXT.PLACE_CODE, BIB_TEXT.AUTHOR, 
 		princetondb.GETBIBTAG(BIB_TEXT.BIB_ID, '240') as TAG_240,
 		BIB_TEXT.TITLE_BRIEF as TAG_245,
 		princetondb.GETBIBTAG(BIB_TEXT.BIB_ID, '260') as TAG_260,
