@@ -16,6 +16,7 @@ import argparse
 import ConfigParser
 import csv
 import cx_Oracle
+import glob
 import httplib
 import logging
 import pymarc
@@ -33,6 +34,7 @@ parser = argparse.ArgumentParser(description='Process ACO batch files as csv.')
 parser.add_argument('-f','--filename',type=str,dest="picklist",help="The full name of csv picklist, e.g. 'ACO_princeton_NYU_batch001_20150227.csv'",required=True)
 args = vars(parser.parse_args())
 picklist = args['picklist']
+batchno = picklist.split('_')[3]
 
 # configuration file parsing (aco.cfg)
 config = ConfigParser.RawConfigParser()
@@ -47,14 +49,16 @@ logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S
 
 def main():
 	logging.info("-" * 50)
-	setup()
-	fetch_picklist()
-	make_new_csv(picklist)
-	get_v2m_mrx()
-	print('-' * 25)
-	format_xml(outdir)
-	print('all done!')
-	logging.info("-" * 50)
+	#setup()
+	#fetch_picklist()
+	#make_new_csv(picklist)
+	#get_v2m_mrx()
+	#print('-' * 25)
+	#format_xml(outdir)
+	mv_batch_files()
+	#print('all done!')
+	#logging.info("-" * 50)
+	
 
 def setup():
 	"Simply create log, in and out dirs if they don't already exist."
@@ -67,7 +71,7 @@ def setup():
 			
 def fetch_picklist():
 	"Fetch the batch picklist from the Windows share."
-	shutil.copyfile(share+picklist, indir+picklist)
+	shutil.copyfile(share+'/for_peter/'+picklist, indir+picklist)
 
 def make_new_csv(picklist):
 	"Input is csv picklist. Create a copy with any missing fields filled in."
@@ -218,6 +222,34 @@ def get_missing_data(bc,ccg,bat,obj):
 			new_row.append(str(x))
 		return new_row
 	c.close()
+
+def mv_batch_files():
+	dest = share+batchno
+	if not os.path.isdir(dest):
+		try:
+			os.mkdir(dest,0775)
+		except:
+			etype,evalue,etraceback = sys.exc_info()
+			print("problem creating batch dir on share. %s" % evalue)
+	else:
+		confirm = raw_input(dest + " already exists. Are you sure you want to overwrite its files? [Yn] ")
+		if confirm in ['y','Y','yes']:
+			pass
+		else:
+			sys.exit('Exiting now')
+
+	if not glob.glob(r'./out/*.csv') or not glob.glob(r'./out/*.xml'):
+		print("no files?")
+		exit
+
+	for f in glob.glob(r'./out/*'):
+		try:
+			shutil.copy(f,dest)
+			print(f + " copied over to " + dest)
+		except OSError: # apparently caused by different filesystems / ownership?
+			etype,evalue,etraceback = sys.exc_info()
+			print("problem with moving files: %s" % evalue)
+			pass
         
 if __name__ == "__main__":
 	main()
