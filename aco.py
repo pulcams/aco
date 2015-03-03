@@ -49,15 +49,15 @@ logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S
 
 def main():
 	logging.info("-" * 50)
-	#setup()
-	#fetch_picklist()
-	#make_new_csv(picklist)
-	#get_v2m_mrx()
-	#print('-' * 25)
-	#format_xml(outdir)
+	setup()
+	fetch_picklist()
+	make_new_csv(picklist)
+	get_v2m_mrx()
+	print('-' * 25)
+	format_xml(outdir)
 	mv_batch_files()
-	#print('all done!')
-	#logging.info("-" * 50)
+	print('all done!')
+	logging.info("-" * 50)
 	
 
 def setup():
@@ -109,14 +109,19 @@ def get_v2m_mrx():
 	with open(outdir+picklist,'rb') as csvfile:
 		reader = csv.reader(csvfile,delimiter=',', quotechar='"')
 		firstline = reader.next()
+		bibs_gotten = []
 		for row in reader:
 			bibid = row[1]
 			batchid = row[21]
 			objid = row[22]
-			conn.request("POST", "/tools/v2m/"+bibid+"?format=marc")
-			got = conn.getresponse()
-			data = got.read()
-			conn.close()
+			
+			if bibid not in bibs_gotten:
+				conn.request("POST", "/tools/v2m/"+bibid+"?format=marc")
+				got = conn.getresponse()
+				data = got.read()
+				conn.close()
+			else:
+				continue
 			
 			doc = etree.fromstring(data)
 						
@@ -163,6 +168,7 @@ def get_v2m_mrx():
 				flag = "ok"
 				f2.write("%s, %s\n" % (bibid, flag))
 				f2.close()
+				bibs_gotten.append(bibid)
 				print('Got mrx for '+str(bibid))
 			except:
 				f2 = open('log/'+filename + '_out_'+timestamp+'.csv', 'a')
@@ -245,7 +251,7 @@ def mv_batch_files():
 	for f in glob.glob(r'./out/*'):
 		try:
 			shutil.copy(f,dest)
-			print(f + " copied over to " + dest)
+			print(f + " => " + dest)
 		except OSError: # apparently caused by different filesystems / ownership?
 			etype,evalue,etraceback = sys.exc_info()
 			print("problem with moving files: %s" % evalue)
