@@ -5,7 +5,7 @@
 For Arabic Collections Online (ACO)
 From csv picklist get MARCXML from Voyager, insert 003, insert CCG_BOOK_ID, format xml
 Set things up aco.cfg. Run like this:
-`python aco.py -f ACO_princeton_NYU_batch001_20150227.csv`
+`python aco.py -f ACO_princeton_NYU_batch001_20150227`
 MARCXML and completed picklist will be in ./out dir.
 !!! NOTE: The picklist needs to be Unicode csv. See documentation in our shared folder. !!!
 from 20150224
@@ -73,7 +73,7 @@ def setup():
 			
 def fetch_picklist():
 	"Fetch the batch picklist from the Windows share."
-	shutil.copyfile(share+'/for_peter/'+picklist, indir+picklist)
+	shutil.copyfile(share+'for_peter/'+picklist, indir+picklist)
 
 def make_new_csv(picklist):
 	"Input is csv picklist. Create a copy with any missing fields filled in."
@@ -87,22 +87,29 @@ def make_new_csv(picklist):
 		firstline = reader.next() # skip header row
 		with open(outdir+localpicklist,'ab+') as outfile:
 				writer = csv.writer(outfile)
-				row = ['LIB','SYS','Item','Volume','CHRON','CCG_BOOK_ID','Crate','Date','CP','Tag_100','Tag_240','Tag_245','Tag_260','Tag_300','Tag_5XX','Tag_6XX','Callno','LOC','COMPLETE Y/N','Notes','Handling instructions','batchNo','objectNo']
+				row = ['LIB','SYS','Item','Volume','CHRON','CCG_BOOK_ID','Crate','Date','CP','Tag_100','Tag_240','Tag_245','Tag_260','Tag_300','Tag_5XX','Tag_6XX','Callno','LOC','COMPLETE Y/N','Notes','Handling instructions','batchNo','objectNo','NOS','BW','Condition','CAT_PROB','other']
 				writer.writerow(row) 
 		for row in reader:
+			bibid = row[1]
 			barcode = row[2]
+			vol = row[3]
+			cron = row[4]
 			ccg = row[5]
 			crate = row[6]
 			batchid = row[21]
 			objid = row[22]
 			ccgid = str(ccg + objid.zfill(6))
-
-			# TODO: check all rows by default, or just ones with certain data missing (and generate ccg_book_id for output otherwise)
-			# When books are added manually, the barcode will be filled in but there'll be no bibid...
-			# if (bibid == '' and barcode != '') or (cron == '' and vol == ''):
-			if (ccg != 'CCG_BOOK_ID'): # if not the first row
-				row = get_missing_data(barcode,ccgid,batchid,objid,crate)
-				
+			nos = row[23]
+			bw = row[24]
+			cond = row[25]
+			cat_prob = row[26]
+			other = row[27]
+			
+			# When books are added manually, the barcode will be filled in but there'll be no bibid. Also, sometimes cron and vol have been added to Vger, so...
+			if (bibid == '' and barcode != '') or (cron == '' and vol == ''):
+			#if (ccg != 'CCG_BOOK_ID'): # if not the first row (this will check all rows against Vger)
+				row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other)
+						
 			# output spreadsheet for local reference
 			with open(outdir+localpicklist,'ab+') as outfile: # this will be an enhanced copy of the picklist in ./in
 				writer = csv.writer(outfile)
@@ -199,7 +206,7 @@ def format_xml(work):
 	logging.info(msg)
 	print(msg)
 	
-def get_missing_data(bc,ccg,bat,obj,crate):
+def get_missing_data(bc,ccg,bat,obj,crate,nos,bw,cond,cat_prob,other):
 	"""
 	When a barcode has been manually added to the picklist, pull in the missing data.
 	"""
@@ -226,7 +233,12 @@ def get_missing_data(bc,ccg,bat,obj,crate):
 		'' as NOTES, 
 		'' as handling_instructions,
 		'%s' as batchNo, 
-		'%s' as objectNo
+		'%s' as objectNo,
+		'%s' as NOS,
+		'%s' as BW,
+		'%s' as Condition,
+		'%s' as CAT_PROB,
+		'%s' as other
 		FROM 
 		((((ITEM_BARCODE 
 		INNER JOIN MFHD_ITEM ON ITEM_BARCODE.ITEM_ID = MFHD_ITEM.ITEM_ID) 
@@ -236,7 +248,7 @@ def get_missing_data(bc,ccg,bat,obj,crate):
 		WHERE (((ITEM_BARCODE.ITEM_BARCODE)='%s'))"""
 
 	c = db.cursor()
-	c.execute(sql % (ccg,crate,bat.zfill(3),obj.zfill(6),bc))
+	c.execute(sql % (ccg,crate,bat.zfill(3),obj.zfill(6),nos,bw,cond,cat_prob,other,bc))
 	new_row = []
 	for row in c:
 		for x in row:
@@ -258,13 +270,13 @@ def mv_batch_files():
 		if confirm in ['y','Y','yes']:
 			pass
 		else:
-			sys.exit('Exiting now')
+			sys.exit('OK. Exiting now')
 
-	if not glob.glob(r'./out/*.csv') or not glob.glob(r'./out/*.xml'):
+	if not glob.glob(r''+outdir+'*.csv') or not glob.glob(r''+outdir+'*.xml'):
 		print("no files?")
 		exit
 
-	for f in glob.glob(r'./out/*'):
+	for f in glob.glob(r''+outdir+'*'):
 		try:
 			shutil.copy(f,dest)
 			print(f + " => " + dest)
