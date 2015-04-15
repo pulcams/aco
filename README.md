@@ -23,7 +23,7 @@ This Python script (aco.py) will retrieve any missing data and get MARCXML for t
 
 Data is entered in an Access database. Batch picklists are generated and exported using a simple form:
 
-![Simple Access form](https://github.com/pulcams/accdb/aco_form.png)
+![Simple Access form](https://raw.githubusercontent.com/pulcams/aco/master/accdb/aco_form.png)
 
 The VBA is in accdb/
 
