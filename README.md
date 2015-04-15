@@ -19,5 +19,13 @@ This Python script (aco.py) will retrieve any missing data and get MARCXML for t
 * [cx_Oracle](http://cx-oracle.sourceforge.net/) ([installation](https://gist.github.com/kimus/10012910) is a bit involved)
 * [lxml](http://lxml.de/) `sudo apt-get install libxml2-dev libxslt1-dev python-dev`
 
+####MS Access
+
+Data is entered in an Access database. Batch picklists are generated and exported using a simple form:
+
+![Simple Access form](https://github.com/pulcams/accdb/aco_form.png)
+
+The VBA is in accdb/
+
 ####P.S.
 Incomplete documentation and code for an initial phase of this project is currently still available here: [https://github.com/pulibrary/aco_planning](https://github.com/pulibrary/aco_planning)
