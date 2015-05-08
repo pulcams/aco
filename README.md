@@ -1,4 +1,4 @@
-cd Arabic Collections Online (ACO)
+Arabic Collections Online (ACO)
 ===============================
 Code for our collaboration with NYU for digitizing Arabic books. 
 
