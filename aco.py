@@ -3,11 +3,14 @@
 
 """
 For Arabic Collections Online (ACO)
-From csv picklist get MARCXML from Voyager, insert 003, insert CCG_BOOK_ID, format xml
-Set things up aco.cfg. Run like this:
+Data is entered into an MS Access table. A picklist per batch is exported as a csv picklist.
+This script fills in any missing fields, fetches the MARCXML, and outputs two spreadsheets,
+one for NYU and one for our internal use. To run, fill in aco.cfg and thenn, for example...
 `python aco.py -f ACO_princeton_NYU_batch001_20150227`
-MARCXML and completed picklist will be in ./out dir.
-!!! NOTE: The picklist needs to be Unicode csv. See documentation in our shared folder. !!!
+Output goes into ./out and then is moved to the designated batch folder on the share.
+NOTE: The picklist needs to be Unicode csv, code page 65001 utf-8, without BOM 
+(it will be by default if using the Access form).
+For more, see the documentation in our shared folder.
 from 20150224
 pmg
 """
@@ -25,6 +28,7 @@ import shutil
 import subprocess
 import sys
 import time
+import xlsxwriter
 from lxml import etree
 
 today = time.strftime("%Y%m%d")
@@ -33,8 +37,8 @@ today = time.strftime("%Y%m%d")
 parser = argparse.ArgumentParser(description='Process ACO batch files as csv.')
 parser.add_argument('-f','--filename',type=str,dest="picklist",help="The full name of csv picklist, e.g. 'ACO_princeton_NYU_batch001_20150227.csv'",required=True)
 args = vars(parser.parse_args())
-picklist = args['picklist'] # this is the picklist as output from Access
-localpicklist = 'local_'+picklist # this is the spreadsheet for local use
+picklist = args['picklist'] # this is the picklist as output from Access; it is the input for this script
+pul_picklist = 'pul_'+picklist
 batchno = picklist.split('_')[3]
 
 # configuration file parsing (aco.cfg)
@@ -44,16 +48,15 @@ indir = config.get('env', 'indir')
 outdir = config.get('env', 'outdir')
 logdir = config.get('env','logdir')
 share = config.get('env','share')
+export = config.get('env','export')
 
-# logging
-logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',filename='log/aco_'+today+'.log',level=logging.INFO)
 
 def main():
 	logging.info("-" * 50)
 	setup()
 	fetch_picklist()
 	make_new_csv(picklist)
-	generate_spreadsheet()
+	generate_spreadsheets(picklist)
 	get_v2m_mrx()
 	print('-' * 25)
 	format_xml(outdir)
@@ -63,7 +66,7 @@ def main():
 	
 
 def setup():
-	"Simply create log, in and out dirs if they don't already exist."
+	"Simply create ./log, ./in and ./out if they don't already exist."
 	
 	dirs = [indir,outdir,logdir]
 
@@ -71,24 +74,32 @@ def setup():
 		if not os.path.exists(d):
 			os.makedirs(d)
 			
+	logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',filename='log/aco_'+today+'.log',level=logging.INFO)
+	
+	
 def fetch_picklist():
-	"Fetch the batch picklist from the Windows share."
-	shutil.copyfile(share+'for_peter/'+picklist, indir+picklist)
-
+	"Fetch the batch picklist from the Windows share and make a local copy in ./in."
+	shutil.copyfile(share+export+picklist, indir+picklist)
+	
+	
 def make_new_csv(picklist):
-	"Input is csv picklist. Create a copy with any missing fields filled in."
+	"""
+	The picklist is a csv file as output from the Access db (exported as code page 65001 utf-8, without BOM -- this is important). 
+	Search Voyager for any missing data and create a fuller copy of the list for next steps.
+	"""
 	try:
-		os.remove(outdir+localpicklist)
+		os.remove(outdir+pul_picklist)
 	except OSError:
 		pass
-	
-	with open(indir+picklist,'rb') as csvfile:
-		reader = csv.reader(csvfile,delimiter=',', quotechar='"')
+
+	with open(indir+picklist,'r') as csvfile:
+		reader = csv.reader(csvfile)
 		firstline = reader.next() # skip header row
-		with open(outdir+localpicklist,'ab+') as outfile:
-				writer = csv.writer(outfile)
-				row = ['LIB','SYS','Item','Volume','CHRON','CCG_BOOK_ID','Crate','Date','CP','Tag_100','Tag_240','Tag_245','Tag_260','Tag_300','Tag_5XX','Tag_6XX','Callno','LOC','COMPLETE Y/N','Notes','Handling instructions','batchNo','objectNo','NOS','BW','Condition','CAT_PROB','other']
-				writer.writerow(row) 
+		with open(outdir+pul_picklist,'wb+') as outfile:
+			writer = csv.writer(outfile)
+			row = ['LIB','SYS','Item','Volume','CHRON','CCG_BOOK_ID','Crate','Date','CP','Tag_100','Tag_240','Tag_245','Tag_260','Tag_300','Tag_5XX','Tag_6XX','Callno','LOC','COMPLETE Y/N','Notes','Handling instructions','batchNo','objectNo','NOS','BW','Condition','CAT_PROB','other']
+			writer.writerow(row) 
+				
 		for row in reader:
 			bibid = row[1]
 			barcode = row[2]
@@ -105,16 +116,17 @@ def make_new_csv(picklist):
 			cat_prob = row[26]
 			other = row[27]
 			
-			# When books are added manually, the barcode will be filled in but there'll be no bibid. Also, sometimes cron and vol have been added to Vger, so...
+			# When books are added manually, the barcode will be filled in but there'll be no bibid. Also, sometimes cron and vol have been subsequently added to Vger, so...
 			if (bibid == '' and barcode != '') or (cron == '' and vol == ''):
-			#if (ccg != 'CCG_BOOK_ID'): # if not the first row (this will check all rows against Vger)
 				row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other)
-						
-			# output spreadsheet for local reference
-			with open(outdir+localpicklist,'ab+') as outfile: # this will be an enhanced copy of the picklist in ./in
+	
+			row[5] = ccgid # make sure the ccgid is in the form of 'princeton_aco000001' ('princeton_aco' plus objid)
+			# output spreadsheet for get_v2m_mrx()
+			with open(outdir+pul_picklist,'ab+') as outfile: # this will be the enhanced copy of the picklist in ./in
 				writer = csv.writer(outfile)
 				writer.writerow(row)
-    	
+				
+				
 def get_v2m_mrx():
 	"Get marcxml using v2m service, and strip out HLDG info."
 	logging.info("get_v2m_mrx()")
@@ -123,10 +135,11 @@ def get_v2m_mrx():
 	filename = "aco_bibs"
 	timestamp = time.strftime("%Y%m%d")
 	
-	with open(outdir+localpicklist,'rb') as csvfile:
+	with open(outdir+pul_picklist,'rb') as csvfile:
 		reader = csv.reader(csvfile,delimiter=',', quotechar='"')
 		firstline = reader.next() # skip the first row
 		bibs_gotten = []
+		
 		for row in reader:
 			bibid = row[1]
 			objid = row[22]
@@ -145,7 +158,6 @@ def get_v2m_mrx():
 				f001 = doc.find("marc:record[@type=\'Bibliographic\']/marc:controlfield[@tag=\'001\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'})
 				f008 = doc.find("marc:record[@type=\'Bibliographic\']/marc:controlfield[@tag=\'008\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'})
 				rec = f001.getparent()
-				#rec2 = f008.getparent()
 				f001_index = rec.index(f001) # get the position of the 001
 				f008_index = rec.index(f008) # and the position of the 008
 	
@@ -153,7 +165,7 @@ def get_v2m_mrx():
 				for hldg in doc.xpath("//marc:record[@type=\'Holdings\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'}):
 					hldg.getparent().remove(hldg)
 				
-				# insert the an 003
+				# insert 003 and 024
 				for bibrec in doc.xpath("//marc:record[@type=\'Bibliographic\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'}):
 					marc = "http://www.loc.gov/MARC21/slim"
 					ns = {"marc", marc}
@@ -174,7 +186,7 @@ def get_v2m_mrx():
 					bibrec.insert(f001_index + 1,f003) # put the 003 immediately following the 001
 					bibrec.insert(f008_index + 2,f024) # put the 024 after the 008
 										
-					data = etree.tostring(doc,pretty_print=True,encoding='utf-8')
+					data = etree.tostring(doc,pretty_print=True,encoding='UTF-8', xml_declaration=True) # encoding='UTF-8' is important!
 					
 				f = open(outdir+'princeton_aco'+bibid+'_marcxml.xml', 'wb+')
 				f2 = open('log/'+filename + '_out_'+timestamp+'.csv', 'a')
@@ -195,8 +207,9 @@ def get_v2m_mrx():
 	msg = 'MARCXML files are in place.'
 	logging.info(msg)
 
+
 def format_xml(work):
-	"Will format marcxml and mets."
+	"Format marcxml."
 	logging.info("formatting_xml")
 	try:
 		subprocess.call(['./batch-format.sh',work])
@@ -206,10 +219,9 @@ def format_xml(work):
 	logging.info(msg)
 	print(msg)
 	
+	
 def get_missing_data(bc,ccg,bat,obj,crate,nos,bw,cond,cat_prob,other):
-	"""
-	When a barcode has been manually added to the picklist, pull in the missing data.
-	"""
+	"Pull in missing data from Vger, based on barcode."
 	user = config.get('database', 'user')
 	pw = config.get('database', 'pw')
 	sid = config.get('database', 'sid')
@@ -219,7 +231,7 @@ def get_missing_data(bc,ccg,bat,obj,crate,nos,bw,cond,cat_prob,other):
 	db = cx_Oracle.connect(user,pw,dsn_tns)
 	
 	sql = """SELECT 'Princeton' as LIB, BIB_MFHD.BIB_ID, ITEM_BARCODE.ITEM_BARCODE, MFHD_ITEM.ITEM_ENUM, 
-		MFHD_ITEM.CHRON,'%s' AS CCG_BOOK_ID,%s AS CRATE,BIB_TEXT.BEGIN_PUB_DATE, BIB_TEXT.PLACE_CODE, 
+		MFHD_ITEM.CHRON,'%s' AS CCG_BOOK_ID,'%s' AS CRATE,BIB_TEXT.BEGIN_PUB_DATE, BIB_TEXT.PLACE_CODE, 
 		BIB_TEXT.AUTHOR, 
 		princetondb.GETBIBTAG(BIB_TEXT.BIB_ID, '240') as TAG_240,
 		BIB_TEXT.TITLE_BRIEF as TAG_245,
@@ -240,12 +252,13 @@ def get_missing_data(bc,ccg,bat,obj,crate,nos,bw,cond,cat_prob,other):
 		'%s' as CAT_PROB,
 		'%s' as other
 		FROM 
-		((((ITEM_BARCODE 
-		INNER JOIN MFHD_ITEM ON ITEM_BARCODE.ITEM_ID = MFHD_ITEM.ITEM_ID) 
-		INNER JOIN BIB_MFHD ON MFHD_ITEM.MFHD_ID = BIB_MFHD.MFHD_ID) 
-		INNER JOIN BIB_TEXT ON BIB_MFHD.BIB_ID = BIB_TEXT.BIB_ID) INNER JOIN MFHD_MASTER ON MFHD_ITEM.MFHD_ID = MFHD_MASTER.MFHD_ID) 
+		ITEM_BARCODE 
+		INNER JOIN MFHD_ITEM ON ITEM_BARCODE.ITEM_ID = MFHD_ITEM.ITEM_ID
+		INNER JOIN BIB_MFHD ON MFHD_ITEM.MFHD_ID = BIB_MFHD.MFHD_ID
+		INNER JOIN BIB_TEXT ON BIB_MFHD.BIB_ID = BIB_TEXT.BIB_ID
+		INNER JOIN MFHD_MASTER ON MFHD_ITEM.MFHD_ID = MFHD_MASTER.MFHD_ID 
 		INNER JOIN LOCATION ON MFHD_MASTER.LOCATION_ID = LOCATION.LOCATION_ID
-		WHERE (((ITEM_BARCODE.ITEM_BARCODE)='%s'))"""
+		WHERE ITEM_BARCODE.ITEM_BARCODE='%s'"""
 
 	c = db.cursor()
 	c.execute(sql % (ccg,crate,bat.zfill(3),obj.zfill(6),nos,bw,cond,cat_prob,other,bc))
@@ -257,7 +270,33 @@ def get_missing_data(bc,ccg,bat,obj,crate,nos,bw,cond,cat_prob,other):
 		return new_row
 	c.close()
 
+
+def generate_spreadsheets(picklist):
+	"Generate spreadsheets for (1) nyu and (2) local use"
+	versions = ['nyu','pul']
+	outfile = picklist
+
+	for version in versions:
+		if version == 'pul':
+			outfile = 'pul_'+outfile
+		with open(outdir+pul_picklist,'rb') as csvfile:
+			reader = csv.reader(csvfile,delimiter=',', quotechar='"'),
+			workbook = xlsxwriter.Workbook(outdir+outfile.replace('.csv','.xlsx'))
+			worksheet = workbook.add_worksheet()
+			worksheet.set_column('C:C', 15) # barcode
+			worksheet.set_column('F:F', 25) # ccg id
+			for r, row in enumerate(reader):
+				for c, col in enumerate(row):
+					if version == 'nyu':
+						if c in (0,1,2,3,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19): # only write out the columns specified in MOA
+							worksheet.write(r,c,col.decode('utf-8'))
+					elif version == 'pul': # just being explicit here
+						worksheet.write(r,c,col.decode('utf-8'))
+			workbook.close()
+
+
 def mv_batch_files():
+	"mv files to share"
 	dest = share+batchno
 	if not os.path.isdir(dest):
 		try:
@@ -266,7 +305,7 @@ def mv_batch_files():
 			etype,evalue,etraceback = sys.exc_info()
 			print("problem creating batch dir on share. %s" % evalue)
 	else:
-		confirm = raw_input(dest + " already exists. Are you sure you want to overwrite its files? [Yn] ")
+		confirm = raw_input(dest + " already exists. Are you sure you want to overwrite its existing files? [Yn] ")
 		if confirm in ['y','Y','yes']:
 			pass
 		else:
@@ -274,61 +313,19 @@ def mv_batch_files():
 
 	if not glob.glob(r''+outdir+'*.csv') or not glob.glob(r''+outdir+'*.xml'):
 		print("no files?")
-		exit
+		sys.exit()
+		
+	for temp in glob.glob(r''+outdir+'*.csv'):
+		os.remove(temp) # remove the pul_picklist, don't need it any more
 
 	for f in glob.glob(r''+outdir+'*'):
 		try:
-			shutil.copy(f,dest)
+			shutil.move(f,dest)
 			print(f + " => " + dest)
-		except OSError: # apparently caused by different filesystems / ownership?
+		except:
 			etype,evalue,etraceback = sys.exc_info()
 			print("problem with moving files: %s" % evalue)
-			pass
-    
-def generate_spreadsheet():
-	"""
-	Generate a spreadsheet for partners, with a few of the total fields
-	"""
-	try:
-		os.remove(outdir+picklist)
-	except OSError:
-		pass
-		
-	with open(outdir+picklist,'ab+') as acooutfile:
-		writer = csv.writer(acooutfile)
-		row = ['LIB','SYS#','Item #','Volume #','CCG_BOOK_ID','Crate #','Date','CP','Tag_100','Tag_240','Tag_245','Tag_260','Tag_300','Tag_5XX','Tag_6XX','Call#','LOC','COMPLETE Y/N','Notes']
-		writer.writerow(row)
-		
-	with open(outdir+localpicklist,'rb') as csvfile:
-		reader = csv.reader(csvfile,delimiter=',', quotechar='"')
-		firstline = reader.next() # skip header row
-		for row in reader:
-			lib = row[0]
-			bibid = row[1]
-			barcode = row[2]
-			vol = row[3]
-			cron = row[4]
-			ccg = row[5]
-			crate = row[6]
-			date = row[7]
-			cp = row[8]
-			TAG_100 = row[9]
-			TAG_240 = row[10]
-			TAG_245 = row[11]
-			TAG_260 = row[12]
-			TAG_300 = row[13]
-			TAG_5XX = row[14]
-			TAG_6XX = row[15]
-			callno = row[16]
-			LOC = row[17]
-			compl = row[18]
-			notes = row[19]
+			pass		
 
-			# output spreadsheet for ACO
-			with open(outdir+picklist,'ab+') as acooutfile:
-				writer = csv.writer(acooutfile)
-				row = [lib,bibid,barcode,vol,ccg,crate,date,cp,TAG_100,TAG_240,TAG_245,TAG_260,TAG_300,TAG_5XX,TAG_6XX,callno,LOC,compl,notes]
-				writer.writerow(row)
-        
 if __name__ == "__main__":
 	main()
