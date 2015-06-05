@@ -7,12 +7,17 @@ See [http://dlib.nyu.edu/aco/](http://dlib.nyu.edu/aco/)
 Thorough documentation is in our network share.
 
 ####jinn.py
-This Python bottle app will retrieve any missing data and get MARCXML for the items in a given batch picklist. On Linux (Ubuntu)... 
+This Python bottle app will retrieve any missing data and get MARCXML for the items in a given batch picklist. 
+
+Generally...
+* export batch from MS Access using the handy form (see screenshot below)
+* go to the app's URL and follow the steps given there
+* deliverables will be a single zip file to be moved to the designated batch folder on our share
+
+If running locally on Linux (Ubuntu)... 
 * `cp aco.cfg.template aco.cfg`
 * fill in aco.cfg
-* export batch from MS Access using the handy form (see screenshot below)
-* go to the app's URL and follow the steps given there. (If running locally, cd into the aco dir and run `python jinn.py`.)
-* deliverables will be a single zip file to be moved to the designated batch folder on our share
+* cd into the aco dir and run `python jinn.py`
 
 ####Requires
 * [bottle](http://bottlepy.org/docs/dev/index.html)
