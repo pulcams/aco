@@ -3,14 +3,20 @@
 
 """
 For Arabic Collections Online (ACO)
-Data is entered into an MS Access table. A picklist per batch is exported as a csv picklist.
-This script fills in any missing fields, fetches the MARCXML, and outputs two spreadsheets,
-one for NYU and one for our internal use. To run, fill in aco.cfg and thenn, for example...
-`python aco.py -f ACO_princeton_NYU_batch001_20150227`
-Output goes into ./out and then is moved to the designated batch folder on the share.
+
+-Data is entered into an MS Access table. 
+-A picklist per batch is exported as a csv picklist (using an Access form).
+-This script fills in any missing fields, fetches the MARCXML, and outputs two spreadsheets,
+one for NYU and one for our internal use. It returns a single zip file.
+
+To run locally, fill in aco.cfg and then...
+`python jinn.py`
+
 NOTE: The picklist needs to be Unicode csv, code page 65001 utf-8, without BOM 
 (it will be by default if using the Access form).
+
 For more, see the documentation in our shared folder.
+
 from 20150224
 pmg
 """
@@ -24,26 +30,22 @@ import httplib
 import logging
 import pymarc
 import os
+import requests
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
+import urllib2
 import xlsxwriter
+import zipfile
 from lxml import etree
 
 today = time.strftime("%Y%m%d")
 
-# commandline argument parsing
-parser = argparse.ArgumentParser(description='Process ACO batch files as csv.')
-parser.add_argument('-f','--filename',type=str,dest="picklist",help="The full name of csv picklist, e.g. 'ACO_princeton_NYU_batch001_20150227.csv'",required=True)
-args = vars(parser.parse_args())
-picklist = args['picklist'] # this is the picklist as output from Access; it is the input for this script
-pul_picklist = 'pul_'+picklist
-batchno = picklist.split('_')[3]
-
 # configuration file parsing (aco.cfg)
 config = ConfigParser.RawConfigParser()
-config.read('aco.cfg')
+config.read('aco.cfg') # <= change this when testing locally
 indir = config.get('env', 'indir')
 outdir = config.get('env', 'outdir')
 logdir = config.get('env','logdir')
@@ -51,38 +53,29 @@ share = config.get('env','share')
 export = config.get('env','export')
 
 
-def main():
-	logging.info("-" * 50)
-	setup()
-	fetch_picklist()
-	make_new_csv(picklist)
-	generate_spreadsheets(picklist)
-	get_v2m_mrx()
-	print('-' * 25)
-	format_xml(outdir)
-	mv_batch_files()
-	print('all done!')
-	logging.info("-" * 50)
-	
-
-def setup():
-	"Simply create ./log, ./in and ./out if they don't already exist."
-	
-	dirs = [indir,outdir,logdir]
-
-	for d in dirs:
-		if not os.path.exists(d):
-			os.makedirs(d)
-			
+def main(picklist):
+	"""
+	The main engine...
+	"""
 	logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p',filename='log/aco_'+today+'.log',level=logging.INFO)
 	
+	name, ext = os.path.splitext(picklist.filename)
+	pul_picklist = 'pul_'+name+ext
+
+	batchno = str(name).split('_')[3]
 	
-def fetch_picklist():
-	"Fetch the batch picklist from the Windows share and make a local copy in ./in."
-	shutil.copyfile(share+export+picklist, indir+picklist)
-	
-	
-def make_new_csv(picklist):
+	if not glob.glob(r''+outdir+'*.xml'):
+		logging.info("-" * 50)
+		make_new_csv(picklist,pul_picklist)
+		generate_spreadsheets(picklist,pul_picklist)
+		get_v2m_mrx(pul_picklist)
+		format_xml(outdir)
+		logging.info("-" * 50)
+
+	return zip_mrx(name) # => jinn.py => index.tpl
+
+
+def make_new_csv(picklist,pul_picklist):
 	"""
 	The picklist is a csv file as output from the Access db (exported as code page 65001 utf-8, without BOM -- this is important). 
 	Search Voyager for any missing data and create a fuller copy of the list for next steps.
@@ -92,43 +85,65 @@ def make_new_csv(picklist):
 	except OSError:
 		pass
 
-	with open(indir+picklist,'r') as csvfile:
-		reader = csv.reader(csvfile)
-		firstline = reader.next() # skip header row
-		with open(outdir+pul_picklist,'wb+') as outfile:
-			writer = csv.writer(outfile)
-			row = ['LIB','SYS','Item','Volume','CHRON','CCG_BOOK_ID','Crate','Date','CP','Tag_100','Tag_240','Tag_245','Tag_260','Tag_300','Tag_5XX','Tag_6XX','Callno','LOC','COMPLETE Y/N','Notes','Handling instructions','batchNo','objectNo','NOS','BW','Condition','CAT_PROB','other']
-			writer.writerow(row) 
-				
-		for row in reader:
-			bibid = row[1]
-			barcode = row[2]
-			vol = row[3]
-			cron = row[4]
-			ccg = row[5]
-			crate = row[6]
-			batchid = row[21]
-			objid = row[22]
-			ccgid = str(ccg + objid.zfill(6))
-			nos = row[23]
-			bw = row[24]
-			cond = row[25]
-			cat_prob = row[26]
-			other = row[27]
+	name, ext = os.path.splitext(picklist.filename)
+
+	paramFile = picklist.file
+	reader = csv.DictReader(paramFile,delimiter=',', quotechar='"')
+
+	with open(outdir+pul_picklist,'wb+') as outfile:
+		writer = csv.writer(outfile)
+		row = ['LIB','SYS','Item','Volume','CHRON','CCG_BOOK_ID','Crate','Date','CP','Tag_100','Tag_240','Tag_245','Tag_260','Tag_300','Tag_5XX','Tag_6XX','Callno','LOC','COMPLETE Y/N','Notes','Handling instructions','batchNo','objectNo','NOS','BW','Condition','CAT_PROB','other']
+		writer.writerow(row) 
 			
+	for row in reader:
+		lib = row['LIB']
+		bibid = row['SYS.']
+		barcode = row['Item .']
+		vol = row['Volume .']
+		cron = row['CHRON']
+		ccg = row['CCG_BOOK_ID']
+		crate = row['Crate .']
+		date = row['Date']
+		cp = row['CP']
+		tag100 = row['TAG_100']
+		tag240 = row['TAG_240']
+		tag245 = row['TAG_245']
+		tag260 = row['TAG_260']
+		tag300 = row['TAG_300']
+		tag5xx = row['TAG_5XX']
+		tag6xx = row['TAG_6XX']
+		callno = row['Call.']
+		loc = row['LOC']
+		complete = row['COMPLETE Y/N']
+		notes = row['NOTES']
+		handl = row['Handling Instructions']
+		batchid = row['batchNo']
+		objid = row['objectNo']
+		ccgid = str(ccg + objid.zfill(6))
+		nos = row['NOS']
+		bw = row['BW']
+		cond = row['Condition']
+		cat_prob = row['CAT_PROB']
+		other = row['other']
+		
+		if (bibid == '' and barcode != '') or (cron == '' and vol == ''):
 			# When books are added manually, the barcode will be filled in but there'll be no bibid. Also, sometimes cron and vol have been subsequently added to Vger, so...
-			if (bibid == '' and barcode != '') or (cron == '' and vol == ''):
-				row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other)
-	
-			row[5] = ccgid # make sure the ccgid is in the form of 'princeton_aco000001' ('princeton_aco' plus objid)
-			# output spreadsheet for get_v2m_mrx()
-			with open(outdir+pul_picklist,'ab+') as outfile: # this will be the enhanced copy of the picklist in ./in
-				writer = csv.writer(outfile)
-				writer.writerow(row)
-				
-				
-def get_v2m_mrx():
-	"Get marcxml using v2m service, and strip out HLDG info."
+			row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other)
+		else:
+			#row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other) # <= this will just go ahead and check everything against Vger
+			row = lib,bibid,barcode,vol,cron,ccgid,crate,date,cp,tag100,tag240,tag245,tag260,tag300,tag5xx,tag6xx,callno,loc,complete,notes,handl,batchid,objid,nos,bw,cond,cat_prob,other
+
+		ccg = ccgid # make sure the ccgid is in the form of 'princeton_aco000001' ('princeton_aco' plus objid)
+		# output spreadsheet for get_v2m_mrx()
+		with open(outdir+pul_picklist,'ab+') as outfile: # this will be the enhanced copy of the picklist in ./in
+			writer = csv.writer(outfile)
+			writer.writerow(row)
+
+
+def get_v2m_mrx(pul_picklist):
+	"""
+	Get marcxml using v2m service, and strip out HLDG info.
+	"""
 	logging.info("get_v2m_mrx()")
 	conn = httplib.HTTPConnection("diglib.princeton.edu")
 	flag = ""
@@ -197,19 +212,21 @@ def get_v2m_mrx():
 				f2.write("%s, %s\n" % (bibid, flag))
 				f2.close()
 				bibs_gotten.append(bibid)
-				print('Got mrx for '+str(bibid))
+				#print('Got mrx for '+str(bibid))
 			except:
 				f2 = open('log/'+filename + '_out_'+timestamp+'.csv', 'a')
 				flag = "not found"
 				f2.write("%s, %s\n" % (bibid, flag))
 				f2.close()
-				print('Didn\'t get mrx for '+str(bibid))
+				#print('Didn\'t get mrx for '+str(bibid))
 	msg = 'MARCXML files are in place.'
 	logging.info(msg)
 
 
 def format_xml(work):
-	"Format marcxml."
+	"""
+	Format marcxml.
+	"""
 	logging.info("formatting_xml")
 	try:
 		subprocess.call(['./batch-format.sh',work])
@@ -217,11 +234,13 @@ def format_xml(work):
 	except:
 		msg = 'Problem with batch-format.sh',sys.exc_info()[0]
 	logging.info(msg)
-	print(msg)
+	#print(msg)
 	
 	
 def get_missing_data(bc,ccg,bat,obj,crate,nos,bw,cond,cat_prob,other):
-	"Pull in missing data from Vger, based on barcode."
+	"""
+	Pull in missing data from Vger, based on barcode.
+	"""
 	user = config.get('database', 'user')
 	pw = config.get('database', 'pw')
 	sid = config.get('database', 'sid')
@@ -271,20 +290,26 @@ def get_missing_data(bc,ccg,bat,obj,crate,nos,bw,cond,cat_prob,other):
 	c.close()
 
 
-def generate_spreadsheets(picklist):
-	"Generate spreadsheets for (1) nyu and (2) local use"
+def generate_spreadsheets(picklist,pul_picklist):
+	"""
+	Generate spreadsheets for (1) nyu and (2) local use
+	"""
 	versions = ['nyu','pul']
-	outfile = picklist
+	name, ext = os.path.splitext(picklist.filename)
+	outfile = str(name+ext)
+	deliverables = []
 
 	for version in versions:
 		if version == 'pul':
 			outfile = 'pul_'+outfile
+		
 		with open(outdir+pul_picklist,'rb') as csvfile:
-			reader = csv.reader(csvfile,delimiter=',', quotechar='"'),
+			reader = csv.reader(csvfile,delimiter=',', quotechar='"')
 			workbook = xlsxwriter.Workbook(outdir+outfile.replace('.csv','.xlsx'))
 			worksheet = workbook.add_worksheet()
 			worksheet.set_column('C:C', 15) # barcode
 			worksheet.set_column('F:F', 25) # ccg id
+
 			for r, row in enumerate(reader):
 				for c, col in enumerate(row):
 					if version == 'nyu':
@@ -293,39 +318,43 @@ def generate_spreadsheets(picklist):
 					elif version == 'pul': # just being explicit here
 						worksheet.write(r,c,col.decode('utf-8'))
 			workbook.close()
+		deliverables.append(outdir+outfile.replace('.csv','.xlsx'))
 
 
-def mv_batch_files():
-	"mv files to share"
-	dest = share+batchno
-	if not os.path.isdir(dest):
-		try:
-			os.mkdir(dest,0775)
-		except:
-			etype,evalue,etraceback = sys.exc_info()
-			print("problem creating batch dir on share. %s" % evalue)
-	else:
-		confirm = raw_input(dest + " already exists. Are you sure you want to overwrite its existing files? [Yn] ")
-		if confirm in ['y','Y','yes']:
-			pass
-		else:
-			sys.exit('OK. Exiting now')
+def cleanup():
+	"""
+	After zipping them, remove the xml, csv and xlsx files
+	"""
+	types = ('*.xml','*.csv','*.xlsx')
+	files_gotten = []
+	# clean up...
+	for files in types:
+		files_gotten.extend(glob.glob(r'./out/'+files))
+		for tempfiles in files_gotten:
+			try:
+				os.remove(tempfiles)
+			except:
+				pass
 
-	if not glob.glob(r''+outdir+'*.csv') or not glob.glob(r''+outdir+'*.xml'):
-		print("no files?")
-		sys.exit()
-		
-	for temp in glob.glob(r''+outdir+'*.csv'):
-		os.remove(temp) # remove the pul_picklist, don't need it any more
 
-	for f in glob.glob(r''+outdir+'*'):
-		try:
-			shutil.move(f,dest)
-			print(f + " => " + dest)
-		except:
-			etype,evalue,etraceback = sys.exc_info()
-			print("problem with moving files: %s" % evalue)
-			pass		
-
-if __name__ == "__main__":
-	main()
+def zip_mrx(picklist):
+	"""
+	Zip up the two xslx files and the xml files.
+	"""
+	# zip up...
+	zf = './out/'+picklist+'.zip'
+	# first, delete zip if already there to avoid dupes
+	if os.path.exists(zf):
+		os.remove(zf)
+	zipper = zipfile.ZipFile(zf,'w')
+	types = ('*.xml','*.xlsx')
+	files_gotten = []
+	for files in types:
+		files_gotten.extend(glob.glob(r'./out/'+files))
+		for name in files_gotten:
+			zipper.write(name, os.path.basename(name), zipfile.ZIP_DEFLATED)
+	zipper.close()
+	cleanup()
+	# return the zipfile for download...
+	zipped = 'file://'+outdir+picklist+'.zip'
+	return (urllib2.urlopen(zipped))
