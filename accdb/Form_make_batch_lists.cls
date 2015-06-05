@@ -117,7 +117,7 @@ On Error GoTo Err_export_btn_Click
     batchNo = Format(Me.batch_txt.Value, "000")
     tableName = "ACO_princeton_NYU_batch" & batchNo & "_" & pickupDate
 
-    csvpath = "\\lib-tsserver\NYU_Arabic_Project\batches\for_peter\" & tableName & ".csv"
+    csvpath = "\\lib-tsserver\NYU_Arabic_Project\batches\exports\" & tableName & ".csv"
     DoCmd.TransferText acExportDelim, , tableName, csvpath, -1, , 65001
 
 MsgBox ("exported to " & csvpath)
