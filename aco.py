@@ -28,13 +28,9 @@ import cx_Oracle
 import glob
 import httplib
 import logging
-import pymarc
 import os
-import requests
-import shutil
 import subprocess
 import sys
-import tarfile
 import time
 import urllib2
 import xlsxwriter
