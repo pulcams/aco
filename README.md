@@ -32,6 +32,3 @@ Data for each batch is entered in an Access database. Batch picklists are genera
 ![Simple Access form](https://raw.githubusercontent.com/pulcams/aco/master/accdb/aco_form.png)
 
 The VBA for this is in ./accdb
-
-####P.S.
-Incomplete documentation and code for an initial phase of this project is currently still available here: [https://github.com/pulibrary/aco_planning](https://github.com/pulibrary/aco_planning)
