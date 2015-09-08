@@ -48,7 +48,6 @@ logdir = config.get('env','logdir')
 share = config.get('env','share')
 export = config.get('env','export')
 
-
 def main(picklist):
 	"""
 	The main engine...
@@ -76,6 +75,8 @@ def make_new_csv(picklist,pul_picklist):
 	The picklist is a csv file as output from the Access db (exported as code page 65001 utf-8, without BOM -- this is important). 
 	Search Voyager for any missing data and create a fuller copy of the list for next steps.
 	"""
+	logging.info("make_new_csv()")
+	
 	try:
 		os.remove(outdir+pul_picklist)
 	except OSError:
@@ -125,11 +126,15 @@ def make_new_csv(picklist,pul_picklist):
 		if (bibid == '' and barcode != '') or (cron == '' and vol == ''):
 			# When books are added manually, the barcode will be filled in but there'll be no bibid. Also, sometimes cron and vol have been subsequently added to Vger, so...
 			row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other)
+			if row is None: # ...which happens if there's a bad barcode...
+				row = lib,bibid,barcode,vol,cron,ccgid,crate,date,cp,tag100,tag240,tag245,tag260,tag300,tag5xx,tag6xx,callno,loc,complete,notes,handl,batchid,objid,nos,bw,cond,cat_prob,other
+				logging.info("BAD BARCODE %s" % barcode)
 		else:
 			#row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other) # <= this will just go ahead and check everything against Vger
 			row = lib,bibid,barcode,vol,cron,ccgid,crate,date,cp,tag100,tag240,tag245,tag260,tag300,tag5xx,tag6xx,callno,loc,complete,notes,handl,batchid,objid,nos,bw,cond,cat_prob,other
 
-		ccg = ccgid # make sure the ccgid is in the form of 'princeton_aco000001' ('princeton_aco' plus objid)
+		ccg = ccgid # makes sure the ccgid is in the form of 'princeton_aco000001' ('princeton_aco' plus objid)
+
 		# output spreadsheet for get_v2m_mrx()
 		with open(outdir+pul_picklist,'ab+') as outfile: # this will be the enhanced copy of the picklist in ./in
 			writer = csv.writer(outfile)
