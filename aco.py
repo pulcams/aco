@@ -146,7 +146,7 @@ def get_v2m_mrx(pul_picklist):
 	Get marcxml using v2m service, and strip out HLDG info.
 	"""
 	logging.info("get_v2m_mrx()")
-	conn = httplib.HTTPConnection("diglib.princeton.edu")
+	conn = httplib.HTTPSConnection("bibdata.princeton.edu")
 	flag = ""
 	filename = "aco_bibs"
 	timestamp = time.strftime("%Y%m%d")
@@ -161,7 +161,7 @@ def get_v2m_mrx(pul_picklist):
 			objid = row[22]
 					
 			if bibid not in bibs_gotten:
-				conn.request("POST", "/tools/v2m/"+bibid+"?format=marc")
+				conn.request("GET", "/bibliographic/"+bibid)
 				got = conn.getresponse()
 				data = got.read()
 				conn.close()
