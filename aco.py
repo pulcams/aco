@@ -28,9 +28,12 @@ import cx_Oracle
 import glob
 import httplib
 import logging
+import pymarc
 import os
+import shutil
 import subprocess
 import sys
+import tarfile
 import time
 import urllib2
 import xlsxwriter
@@ -47,6 +50,7 @@ outdir = config.get('env', 'outdir')
 logdir = config.get('env','logdir')
 share = config.get('env','share')
 export = config.get('env','export')
+
 
 def main(picklist):
 	"""
@@ -75,8 +79,6 @@ def make_new_csv(picklist,pul_picklist):
 	The picklist is a csv file as output from the Access db (exported as code page 65001 utf-8, without BOM -- this is important). 
 	Search Voyager for any missing data and create a fuller copy of the list for next steps.
 	"""
-	logging.info("make_new_csv()")
-	
 	try:
 		os.remove(outdir+pul_picklist)
 	except OSError:
@@ -126,18 +128,17 @@ def make_new_csv(picklist,pul_picklist):
 		if (bibid == '' and barcode != '') or (cron == '' and vol == ''):
 			# When books are added manually, the barcode will be filled in but there'll be no bibid. Also, sometimes cron and vol have been subsequently added to Vger, so...
 			row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other)
-			if row is None: # ...which happens if there's a bad barcode...
+			if row is None:
 				row = lib,bibid,barcode,vol,cron,ccgid,crate,date,cp,tag100,tag240,tag245,tag260,tag300,tag5xx,tag6xx,callno,loc,complete,notes,handl,batchid,objid,nos,bw,cond,cat_prob,other
 				logging.info("BAD BARCODE %s" % barcode)
 		else:
 			#row = get_missing_data(barcode,ccgid,batchid,objid,crate,nos,bw,cond,cat_prob,other) # <= this will just go ahead and check everything against Vger
 			row = lib,bibid,barcode,vol,cron,ccgid,crate,date,cp,tag100,tag240,tag245,tag260,tag300,tag5xx,tag6xx,callno,loc,complete,notes,handl,batchid,objid,nos,bw,cond,cat_prob,other
 
-		ccg = ccgid # makes sure the ccgid is in the form of 'princeton_aco000001' ('princeton_aco' plus objid)
-
+		ccg = ccgid # make sure the ccgid is in the form of 'princeton_aco000001' ('princeton_aco' plus objid)
 		# output spreadsheet for get_v2m_mrx()
-		with open(outdir+pul_picklist,'ab+') as outfile: # this will be the enhanced copy of the picklist in ./in
-			writer = csv.writer(outfile)
+		with open(outdir+pul_picklist,'ab+') as out: # this will be the enhanced copy of the picklist in ./in
+			writer = csv.writer(out)
 			writer.writerow(row)
 
 
@@ -150,7 +151,8 @@ def get_v2m_mrx(pul_picklist):
 	flag = ""
 	filename = "aco_bibs"
 	timestamp = time.strftime("%Y%m%d")
-	
+	nsm = {'marc':'http://www.loc.gov/MARC21/slim'}	
+
 	with open(outdir+pul_picklist,'rb') as csvfile:
 		reader = csv.reader(csvfile,delimiter=',', quotechar='"')
 		firstline = reader.next() # skip the first row
@@ -167,22 +169,22 @@ def get_v2m_mrx(pul_picklist):
 				conn.close()
 			else:
 				continue
-			
+
 			doc = etree.fromstring(data)
-						
+			#print(doc.find("marc:controlfield[@tag='001']",namespaces=nsm).text)
 			try:
-				f001 = doc.find("marc:record[@type=\'Bibliographic\']/marc:controlfield[@tag=\'001\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'})
-				f008 = doc.find("marc:record[@type=\'Bibliographic\']/marc:controlfield[@tag=\'008\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'})
+				f001 = doc.find("marc:controlfield[@tag=\'001\']",namespaces=nsm)
+				f008 = doc.find("marc:controlfield[@tag=\'008\']",namespaces=nsm)
 				rec = f001.getparent()
 				f001_index = rec.index(f001) # get the position of the 001
 				f008_index = rec.index(f008) # and the position of the 008
-	
+				
 				# remove the Holding record(s)
-				for hldg in doc.xpath("//marc:record[@type=\'Holdings\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'}):
-					hldg.getparent().remove(hldg)
+				#for hldg in doc.xpath("//record[@type=\'Holdings\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'}):
+				#	hldg.getparent().remove(hldg)
 				
 				# insert 003 and 024
-				for bibrec in doc.xpath("//marc:record[@type=\'Bibliographic\']",namespaces={'marc':'http://www.loc.gov/MARC21/slim'}):
+				for bibrec in doc.xpath("//marc:record",namespaces=nsm):
 					marc = "http://www.loc.gov/MARC21/slim"
 					ns = {"marc", marc}
 					# 003
